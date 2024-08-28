@@ -90,13 +90,25 @@ func StartAgent() *mux.Router {
 	// Configuração do mux com auto-instrumentação
 	router := mux.NewRouter()
 
-	// Middleware otelhttp com RequestHook para adicionar atributos personalizados
-	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider), otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
-		return operation + " - " + r.Method + " " + r.URL.Path
-	}), otelhttp.WithSpanOptions(trace.WithAttributes(
-		attribute.String("http.method", ""),
-		attribute.String("http.path", ""),
-	))))
+	// Middleware para adicionar atributos personalizados
+	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider)))
+	router.Use(customMiddleware)
 
 	return router
+}
+
+func customMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Inicia um span manualmente, se necessário, ou usa o span já existente
+		span := trace.SpanFromContext(r.Context())
+		span.SetAttributes(
+			attribute.String("http.method", r.Method),
+			attribute.String("http.path", r.URL.Path),
+			attribute.String("http.url", r.URL.String()),
+			attribute.String("http.user_agent", r.UserAgent()),
+			attribute.String("http.client_ip", r.RemoteAddr),
+		)
+
+		next.ServeHTTP(w, r)
+	})
 }
