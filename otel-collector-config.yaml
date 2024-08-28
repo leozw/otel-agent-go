@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+exporters:
+  otlp:
+    endpoint: https://tempo-prod-12-prod-sa-east-0.grafana.net:443
+    headers:
+      Authorization: Basic NjI1OTU4OmV5SnJJam9pTldGaE1UYzFNV0ZpT0RJM1ptSXlOV05pWTJKa00yTmpZalpsTldJMVlqWXhaak5sTnpkbVpTSXNJbTRpT2lKaFpDSXNJbWxrSWpvNE9EVTJNamQ5
+
+  otlphttp:
+    endpoint: https://tempo.elvenobservability.com/http
+    headers:
+      X-Scope-OrgID: elven
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlbHZlbi1sZ3RtLWp3dCIsInN1YiI6IjEyMzQ1Njc4OTAiLCJuYW1lIjoiRWx2ZW4gTEdUTSIsImFkbWluIjp0cnVlLCJpYXQiOjE3MjQ3ODczMTZ9.KERmZKDT6hsmYCP0OWUNrnE07_Rne1QJyUKi15voJ3g"
+
+  prometheusremotewrite:
+    endpoint: https://mimir.elvenobservability.com/api/v1/push
+    headers:
+      X-Scope-OrgID: elven
+      Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlbHZlbi1sZ3RtLWp3dCIsInN1YiI6IjEyMzQ1Njc4OTAiLCJuYW1lIjoiRWx2ZW4gTEdUTSIsImFkbWluIjp0cnVlLCJpYXQiOjE3MjQ3ODczMTZ9.KERmZKDT6hsmYCP0OWUNrnE07_Rne1QJyUKi15voJ3g"
+
+processors:
+  batch: {}
+  filter:
+    metrics:
+      exclude:
+        match_type: regexp
+        metric_names:
+          - "go_.*"
+          - "scrape_.*"
+          - "otlp_.*"
+          - "promhttp_.*"
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch, filter]
+      exporters: [prometheusremotewrite]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp, otlp]
