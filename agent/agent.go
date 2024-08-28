@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
 	"time"
 
@@ -37,7 +36,7 @@ func StartAgent() *mux.Router {
 		deploymentEnvironment = "development"
 	}
 
-	// Configura o recurso do serviço
+	// Configura o recurso do serviço com atributos globais
 	resources, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(serviceName),
@@ -76,7 +75,7 @@ func StartAgent() *mux.Router {
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Configura propagadores
+	// Configura propagadores (B3 como padrão)
 	propagators := b3.New()
 	otel.SetTextMapPropagator(propagators)
 
@@ -88,22 +87,11 @@ func StartAgent() *mux.Router {
 	// Configuração do mux com auto-instrumentação
 	router := mux.NewRouter()
 
-	// Middleware para auto-instrumentação com spans detalhados
+	// Adiciona o nosso middleware de tracing personalizado
+	router.Use(tracingMiddleware)
+
+	// Adiciona o middleware do otelhttp para auto-instrumentação
 	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider)))
-
-	// Rotas de exemplo
-	router.HandleFunc("/external-service-3", func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := otel.Tracer("custom-tracer").Start(r.Context(), "external-service-3-handler")
-		defer span.End()
-
-		// Simular uma chamada externa com span separado
-		_, extSpan := otel.Tracer("custom-tracer").Start(ctx, "external-api-call")
-		// Simular um tempo de execução
-		time.Sleep(100 * time.Millisecond)
-		extSpan.End()
-
-		w.Write([]byte("Processed external service"))
-	}).Methods("GET")
 
 	return router
 }
