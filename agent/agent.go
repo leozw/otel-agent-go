@@ -22,10 +22,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
 
+// StartAgent configura e inicia o agente OpenTelemetry para a aplicação.
 func StartAgent() *mux.Router {
 	ctx := context.Background()
 
-	// Configura o serviço e o ambiente
 	serviceName := os.Getenv("SERVICE_NAME")
 	if serviceName == "" {
 		serviceName = "default-service"
@@ -39,7 +39,6 @@ func StartAgent() *mux.Router {
 		deploymentEnvironment = "development"
 	}
 
-	// Configura o recurso do serviço com atributos globais
 	resources, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(serviceName),
@@ -51,19 +50,16 @@ func StartAgent() *mux.Router {
 		log.Fatalf("failed to create resource: %v", err)
 	}
 
-	// Configura o exportador de traces com a URL completa
 	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")))
 	if err != nil {
 		log.Fatalf("failed to create trace exporter: %v", err)
 	}
 
-	// Configura o exportador de métricas com a URL completa
 	metricExporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")))
 	if err != nil {
 		log.Fatalf("failed to create metric exporter: %v", err)
 	}
 
-	// Configura o provedor de trace
 	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(resources),
@@ -71,14 +67,12 @@ func StartAgent() *mux.Router {
 	)
 	otel.SetTracerProvider(tracerProvider)
 
-	// Configura o provedor de métricas
 	meterProvider := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
 		sdkmetric.WithResource(resources),
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Configura propagadores (B3 + W3C Trace Context)
 	propagators := propagation.NewCompositeTextMapPropagator(
 		b3.New(),
 		propagation.TraceContext{},
@@ -86,12 +80,10 @@ func StartAgent() *mux.Router {
 	)
 	otel.SetTextMapPropagator(propagators)
 
-	// Instrumentação de runtime
 	if err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second)); err != nil {
 		log.Fatalf("failed to start runtime instrumentation: %v", err)
 	}
 
-	// Configuração do mux com auto-instrumentação e atributos personalizados
 	router := mux.NewRouter()
 	router.Use(otelhttp.NewMiddleware(
 		"http-server",
@@ -102,10 +94,8 @@ func StartAgent() *mux.Router {
 		}),
 	))
 
-	// Middleware personalizado para adicionar atributos aos spans
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Corrigido para capturar o contexto e o span
 			ctx, span := otel.Tracer("http-server").Start(r.Context(), r.Method+" "+r.URL.Path)
 			defer span.End()
 
@@ -117,7 +107,6 @@ func StartAgent() *mux.Router {
 				attribute.String("http.client_ip", r.RemoteAddr),
 			)
 
-			// Propagar o novo contexto com o span para o próximo handler
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
@@ -125,6 +114,7 @@ func StartAgent() *mux.Router {
 	return router
 }
 
+// GetHTTPClient retorna um cliente HTTP com transporte instrumentado para propagação de trace.
 func GetHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
