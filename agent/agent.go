@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel"
@@ -84,25 +85,25 @@ func StartAgent() *mux.Router {
 		log.Fatalf("failed to start runtime instrumentation: %v", err)
 	}
 
-	// Configurando o mux com auto-instrumentação
+	// Configuração do mux com auto-instrumentação
 	router := mux.NewRouter()
-	router.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, span := otel.Tracer("http-server").Start(r.Context(), r.URL.Path)
-			defer span.End()
 
-			// Configurando atributos manualmente
-			span.SetAttributes(
-				semconv.HTTPMethodKey.String(r.Method),
-				semconv.HTTPTargetKey.String(r.URL.Path),
-				semconv.UserAgentOriginalKey.String(r.UserAgent()),
-				semconv.NetSockPeerAddrKey.String(r.RemoteAddr),
-			)
+	// Middleware para auto-instrumentação com spans detalhados
+	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider)))
 
-			// Envolvendo a chamada original
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	})
+	// Rotas de exemplo
+	router.HandleFunc("/external-service-3", func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := otel.Tracer("custom-tracer").Start(r.Context(), "external-service-3-handler")
+		defer span.End()
+
+		// Simular uma chamada externa com span separado
+		_, extSpan := otel.Tracer("custom-tracer").Start(ctx, "external-api-call")
+		// Simular um tempo de execução
+		time.Sleep(100 * time.Millisecond)
+		extSpan.End()
+
+		w.Write([]byte("Processed external service"))
+	}).Methods("GET")
 
 	return router
 }
