@@ -23,50 +23,48 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
 
-// Config contém as configurações para o agente.
-type Config struct {
-	ServiceName           string
-	ServiceVersion        string
-	DeploymentEnvironment string
-	TraceExporterURL      string
-	MetricsExporterURL    string
-}
-
-// DefaultConfig retorna uma configuração padrão baseada em variáveis de ambiente.
-func DefaultConfig() Config {
-	return Config{
-		ServiceName:           getEnv("SERVICE_NAME", "default-service"),
-		ServiceVersion:        getEnv("SERVICE_VERSION", "1.0.0"),
-		DeploymentEnvironment: getEnv("DEPLOYMENT_ENVIRONMENT", "development"),
-		TraceExporterURL:      os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
-		MetricsExporterURL:    os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"),
-	}
-}
-
-// StartAgent inicializa o agente com a configuração fornecida.
+// StartAgent configura e inicia o agente OpenTelemetry para a aplicação.
 func StartAgent(config Config) *mux.Router {
 	ctx := context.Background()
 
-	// Configura o recurso do serviço
+	serviceName := config.ServiceName
+	if serviceName == "" {
+		serviceName = "default-service"
+	}
+	serviceVersion := config.ServiceVersion
+	if serviceVersion == "" {
+		serviceVersion = "1.0.0"
+	}
+	deploymentEnvironment := config.DeploymentEnvironment
+	if deploymentEnvironment == "" {
+		deploymentEnvironment = "development"
+	}
+
 	resources, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceNameKey.String(config.ServiceName),
-			semconv.ServiceVersionKey.String(config.ServiceVersion),
-			semconv.DeploymentEnvironmentKey.String(config.DeploymentEnvironment),
+			semconv.ServiceNameKey.String(serviceName),
+			semconv.ServiceVersionKey.String(serviceVersion),
+			semconv.DeploymentEnvironmentKey.String(deploymentEnvironment),
 		),
 	)
 	if err != nil {
 		log.Fatalf("failed to create resource: %v", err)
 	}
 
-	// Configura os exportadores de trace e métricas
-	traceExporter := initTraceExporter(ctx, config.TraceExporterURL)
-	metricExporter := initMetricExporter(ctx, config.MetricsExporterURL)
+	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(config.TraceEndpoint))
+	if err != nil {
+		log.Fatalf("failed to create trace exporter: %v", err)
+	}
 
-	// Configura o provedor de trace e métricas
+	metricExporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(config.MetricEndpoint))
+	if err != nil {
+		log.Fatalf("failed to create metric exporter: %v", err)
+	}
+
+	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
 	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(resources),
-		sdktrace.WithSpanProcessor(sdktrace.NewBatchSpanProcessor(traceExporter)),
+		sdktrace.WithSpanProcessor(bsp),
 	)
 	otel.SetTracerProvider(tracerProvider)
 
@@ -76,7 +74,6 @@ func StartAgent(config Config) *mux.Router {
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Configura propagadores
 	propagators := propagation.NewCompositeTextMapPropagator(
 		b3.New(),
 		propagation.TraceContext{},
@@ -84,12 +81,10 @@ func StartAgent(config Config) *mux.Router {
 	)
 	otel.SetTextMapPropagator(propagators)
 
-	// Instrumentação de runtime
 	if err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second)); err != nil {
 		log.Fatalf("failed to start runtime instrumentation: %v", err)
 	}
 
-	// Criação do roteador e adição dos middlewares
 	router := mux.NewRouter()
 	router.Use(otelhttp.NewMiddleware(
 		"http-server",
@@ -99,19 +94,34 @@ func StartAgent(config Config) *mux.Router {
 			return r.Method + " " + r.URL.Path
 		}),
 	))
-	router.Use(LoggingMiddleware)
+
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, span := otel.Tracer("http-server").Start(r.Context(), r.Method+" "+r.URL.Path)
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("http.method", r.Method),
+				attribute.String("http.path", r.URL.Path),
+				attribute.String("http.url", r.URL.String()),
+				attribute.String("http.user_agent", r.UserAgent()),
+				attribute.String("http.client_ip", r.RemoteAddr),
+			)
+
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
 
 	return router
 }
 
-// GetHTTPClient retorna um cliente HTTP instrumentado.
+// GetHTTPClient retorna um cliente HTTP com transporte instrumentado para propagação de trace.
 func GetHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
 }
 
-// NewRequestWithContext cria uma nova requisição HTTP com o contexto propagado.
 func NewRequestWithContext(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
@@ -120,46 +130,22 @@ func NewRequestWithContext(ctx context.Context, method, url string, body io.Read
 	return req, nil
 }
 
-// LoggingMiddleware adiciona logs e atributos ao span.
-func LoggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := otel.Tracer("http-server").Start(r.Context(), r.Method+" "+r.URL.Path)
-		defer span.End()
-
-		span.SetAttributes(
-			attribute.String("http.method", r.Method),
-			attribute.String("http.path", r.URL.Path),
-			attribute.String("http.url", r.URL.String()),
-			attribute.String("http.user_agent", r.UserAgent()),
-			attribute.String("http.client_ip", r.RemoteAddr),
-		)
-
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+// Config struct to hold the configuration parameters
+type Config struct {
+	ServiceName           string
+	ServiceVersion        string
+	DeploymentEnvironment string
+	TraceEndpoint         string
+	MetricEndpoint        string
 }
 
-// Funções auxiliares para inicializar os exportadores
-
-func initTraceExporter(ctx context.Context, url string) sdktrace.SpanExporter {
-	exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(url))
-	if err != nil {
-		log.Fatalf("failed to create trace exporter: %v", err)
+// DefaultConfig provides a default configuration
+func DefaultConfig() Config {
+	return Config{
+		ServiceName:           os.Getenv("SERVICE_NAME"),
+		ServiceVersion:        os.Getenv("SERVICE_VERSION"),
+		DeploymentEnvironment: os.Getenv("DEPLOYMENT_ENVIRONMENT"),
+		TraceEndpoint:         os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+		MetricEndpoint:        os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"),
 	}
-	return exporter
-}
-
-func initMetricExporter(ctx context.Context, url string) sdkmetric.Exporter {
-	exporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpointURL(url))
-	if err != nil {
-		log.Fatalf("failed to create metric exporter: %v", err)
-	}
-	return exporter
-}
-
-// getEnv retorna o valor de uma variável de ambiente ou um valor padrão se não estiver definido.
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return fallback
 }
