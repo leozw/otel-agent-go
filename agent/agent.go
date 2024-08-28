@@ -20,7 +20,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
-	"go.opentelemetry.io/otel/trace"
 )
 
 func StartAgent() *mux.Router {
@@ -79,7 +78,7 @@ func StartAgent() *mux.Router {
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Configura propagadores (B3 como padrão)
+	// Configura propagadores (B3 + W3C Trace Context)
 	propagators := propagation.NewCompositeTextMapPropagator(
 		b3.New(),
 		propagation.TraceContext{},
@@ -92,28 +91,36 @@ func StartAgent() *mux.Router {
 		log.Fatalf("failed to start runtime instrumentation: %v", err)
 	}
 
-	// Configuração do mux com auto-instrumentação
+	// Configuração do mux com auto-instrumentação e atributos personalizados
 	router := mux.NewRouter()
+	router.Use(otelhttp.NewMiddleware(
+		"http-server",
+		otelhttp.WithTracerProvider(tracerProvider),
+		otelhttp.WithPropagators(propagators),
+		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+	))
 
-	// Middleware para adicionar atributos personalizados
-	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider)))
-	router.Use(customMiddleware)
+	// Middleware personalizado para adicionar atributos aos spans
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Corrigido para capturar o contexto e o span
+			ctx, span := otel.Tracer("http-server").Start(r.Context(), r.Method+" "+r.URL.Path)
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("http.method", r.Method),
+				attribute.String("http.path", r.URL.Path),
+				attribute.String("http.url", r.URL.String()),
+				attribute.String("http.user_agent", r.UserAgent()),
+				attribute.String("http.client_ip", r.RemoteAddr),
+			)
+
+			// Propagar o novo contexto com o span para o próximo handler
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
 
 	return router
-}
-
-func customMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Inicia um span manualmente, se necessário, ou usa o span já existente
-		span := trace.SpanFromContext(r.Context())
-		span.SetAttributes(
-			attribute.String("http.method", r.Method),
-			attribute.String("http.path", r.URL.Path),
-			attribute.String("http.url", r.URL.String()),
-			attribute.String("http.user_agent", r.UserAgent()),
-			attribute.String("http.client_ip", r.RemoteAddr),
-		)
-
-		next.ServeHTTP(w, r)
-	})
 }
