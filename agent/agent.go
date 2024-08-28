@@ -79,7 +79,7 @@ func StartAgent() *mux.Router {
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Configura propagadores compostos (B3 + W3C Trace Context)
+	// Configura propagadores (B3 + W3C Trace Context)
 	propagators := propagation.NewCompositeTextMapPropagator(
 		b3.New(),
 		propagation.TraceContext{},
@@ -95,16 +95,18 @@ func StartAgent() *mux.Router {
 	// Configuração do mux com auto-instrumentação
 	router := mux.NewRouter()
 
-	// Middleware para adicionar atributos personalizados
+	// Middleware para auto-instrumentação HTTP
 	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider)))
+
+	// Middleware personalizado para adicionar atributos a cada requisição
 	router.Use(customMiddleware)
 
 	return router
 }
 
+// Middleware personalizado para adicionar atributos aos spans
 func customMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Inicia um span manualmente, se necessário, ou usa o span já existente
 		span := trace.SpanFromContext(r.Context())
 		span.SetAttributes(
 			attribute.String("http.method", r.Method),
@@ -116,4 +118,11 @@ func customMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Cria um cliente HTTP instrumentado para chamadas externas
+func InstrumentedHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
 }
