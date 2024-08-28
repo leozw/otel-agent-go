@@ -28,7 +28,7 @@ func main() {
 	}
 	fmt.Println("NEXT_PUBLIC_FILE_MANAGER_URL:", fileManagerURL)
 
-	client := &http.Client{}
+	client := agent.GetHTTPClient()
 
 	// Definindo as rotas da aplicação
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

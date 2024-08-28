@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -119,4 +120,12 @@ func GetHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: otelhttp.NewTransport(http.DefaultTransport),
 	}
+}
+
+func NewRequestWithContext(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
 }
