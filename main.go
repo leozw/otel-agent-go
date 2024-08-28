@@ -19,7 +19,8 @@ type Response struct {
 
 func main() {
 	// Inicia o agente, que cuida de toda a instrumentação do OpenTelemetry
-	router := agent.StartAgent()
+	config := agent.DefaultConfig()
+	router := agent.StartAgent(config)
 	port := 3000
 
 	fileManagerURL := os.Getenv("NEXT_PUBLIC_FILE_MANAGER_URL")
