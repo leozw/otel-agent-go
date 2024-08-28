@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/leozw/otel-agent-go/agent"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Response struct {
@@ -28,11 +27,6 @@ func main() {
 	}
 	fmt.Println("NEXT_PUBLIC_FILE_MANAGER_URL:", fileManagerURL)
 
-	// Instrumenta as chamadas HTTP com o OpenTelemetry
-	client := http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
-	}
-
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusOK, Response{Message: "Hello, Open!"})
 	}).Methods("GET")
@@ -46,7 +40,7 @@ func main() {
 	}).Methods("GET")
 
 	router.HandleFunc("/external-service-1", func(w http.ResponseWriter, r *http.Request) {
-		response, err := client.Get("https://jsonplaceholder.typicode.com/posts/1")
+		response, err := http.Get("https://jsonplaceholder.typicode.com/posts/1")
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Erro ao chamar o serviço externo 1")
 			return
@@ -63,7 +57,7 @@ func main() {
 	}).Methods("GET")
 
 	router.HandleFunc("/external-service-2", func(w http.ResponseWriter, r *http.Request) {
-		response, err := client.Get("https://jsonplaceholder.typicode.com/users/1")
+		response, err := http.Get("https://jsonplaceholder.typicode.com/users/1")
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Erro ao chamar o serviço externo 2")
 			return
@@ -81,7 +75,7 @@ func main() {
 
 	router.HandleFunc("/local-service", func(w http.ResponseWriter, r *http.Request) {
 		url := fmt.Sprintf("http://localhost:%d/buteco", port)
-		response, err := client.Get(url)
+		response, err := http.Get(url)
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Erro ao chamar o serviço local")
 			return
@@ -99,7 +93,7 @@ func main() {
 
 	router.HandleFunc("/file-manager-service", func(w http.ResponseWriter, r *http.Request) {
 		url := fmt.Sprintf("%s/files", fileManagerURL)
-		response, err := client.Get(url)
+		response, err := http.Get(url)
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Erro ao chamar o serviço de file manager")
 			return
@@ -116,7 +110,7 @@ func main() {
 	}).Methods("GET")
 
 	router.HandleFunc("/external-service-3", func(w http.ResponseWriter, r *http.Request) {
-		response, err := client.Get("https://jsonplaceholder.typicode.com/albums/1")
+		response, err := http.Get("https://jsonplaceholder.typicode.com/albums/1")
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Erro ao chamar o serviço externo 3")
 			return
@@ -142,8 +136,6 @@ func respondWithError(w http.ResponseWriter, code int, message string) {
 
 func respondWithJSON(w http.ResponseWriter, code int, payload Response) {
 	w.Header().Set("Content-Type", "application/json")
-	if code != http.StatusOK { // se o código de resposta não for 200, chamamos WriteHeader
-		w.WriteHeader(code)
-	}
+	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(payload)
 }

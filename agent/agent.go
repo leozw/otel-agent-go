@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -78,8 +79,12 @@ func StartAgent() *mux.Router {
 	)
 	otel.SetMeterProvider(meterProvider)
 
-	// Configura propagadores (B3 como padrão)
-	propagators := b3.New()
+	// Configura propagadores compostos (B3 + W3C Trace Context)
+	propagators := propagation.NewCompositeTextMapPropagator(
+		b3.New(),
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)
 	otel.SetTextMapPropagator(propagators)
 
 	// Instrumentação de runtime
