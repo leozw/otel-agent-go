@@ -124,3 +124,9 @@ func StartAgent() *mux.Router {
 
 	return router
 }
+
+func GetHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
+}
