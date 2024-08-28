@@ -24,8 +24,8 @@ services:
       - OTEL_SERVICE_NAME=go-otel-agent
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=otlp
-      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318
-      - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=otel-collector:4318
+      - OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=otel-collector:4318
     networks:
       - app-network
 
