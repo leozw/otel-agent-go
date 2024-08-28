@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -48,14 +49,35 @@ func StartAgent() *mux.Router {
 		log.Fatalf("failed to create resource: %v", err)
 	}
 
+	// Função auxiliar para processar o endpoint
+	processEndpoint := func(endpoint string, path string) (string, error) {
+		u, err := url.Parse(endpoint)
+		if err != nil {
+			return "", err
+		}
+		if u.Scheme == "" {
+			u.Scheme = "http"
+		}
+		u.Path = path
+		return u.String(), nil
+	}
+
 	// Configura o exportador de traces
-	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")))
+	tracesEndpoint, err := processEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), "/v1/traces")
+	if err != nil {
+		log.Fatalf("failed to process traces endpoint: %v", err)
+	}
+	traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(tracesEndpoint))
 	if err != nil {
 		log.Fatalf("failed to create trace exporter: %v", err)
 	}
 
 	// Configura o exportador de métricas
-	metricExporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")))
+	metricsEndpoint, err := processEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), "/v1/metrics")
+	if err != nil {
+		log.Fatalf("failed to process metrics endpoint: %v", err)
+	}
+	metricExporter, err := otlpmetrichttp.New(ctx, otlpmetrichttp.WithEndpoint(metricsEndpoint))
 	if err != nil {
 		log.Fatalf("failed to create metric exporter: %v", err)
 	}
