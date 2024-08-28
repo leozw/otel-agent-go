@@ -18,7 +18,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "3000:3000"
     environment:
       - ENV=production
       - OTEL_SERVICE_NAME=go-otel-agent

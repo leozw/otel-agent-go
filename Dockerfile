@@ -23,7 +23,7 @@ WORKDIR /app
 COPY --from=builder /app/main .
 
 # Expor a porta que a aplicação irá utilizar
-EXPOSE 8080
+EXPOSE 3000
 
 # Verifique se o binário existe e tem permissões de execução
 RUN chmod +x ./main

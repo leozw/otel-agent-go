@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -11,12 +12,14 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func StartAgent() *mux.Router {
@@ -87,11 +90,13 @@ func StartAgent() *mux.Router {
 	// Configuração do mux com auto-instrumentação
 	router := mux.NewRouter()
 
-	// Adiciona o nosso middleware de tracing personalizado
-	router.Use(tracingMiddleware)
-
-	// Adiciona o middleware do otelhttp para auto-instrumentação
-	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider)))
+	// Middleware otelhttp com RequestHook para adicionar atributos personalizados
+	router.Use(otelhttp.NewMiddleware("http-server", otelhttp.WithTracerProvider(tracerProvider), otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+		return operation + " - " + r.Method + " " + r.URL.Path
+	}), otelhttp.WithSpanOptions(trace.WithAttributes(
+		attribute.String("http.method", ""),
+		attribute.String("http.path", ""),
+	))))
 
 	return router
 }
