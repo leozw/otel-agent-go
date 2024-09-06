@@ -117,17 +117,35 @@ func StartAgent(config Config) *mux.Router {
 
 // GetHTTPClient retorna um cliente HTTP com transporte instrumentado para propagação de trace.
 func GetHTTPClient() *http.Client {
+	tr := otelhttp.NewTransport(http.DefaultTransport, otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
+		b3.New(),
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	)))
+
 	return &http.Client{
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Transport: tr,
 	}
 }
 
-func NewRequestWithContext(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
+// GetRequestWithContext encapsula a criação de uma nova requisição HTTP com o contexto propagado.
+func GetRequestWithContext(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
 	}
 	return req, nil
+}
+
+// ExecuteRequest encapsula a execução de uma requisição HTTP, propagando o context
+func ExecuteRequest(ctx context.Context, client *http.Client, method, url string, body io.Reader) (*http.Response, error) {
+	req, err := GetRequestWithContext(ctx, method, url, body)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return client.Do(req)
 }
 
 // Config struct to hold the configuration parameters

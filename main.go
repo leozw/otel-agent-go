@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gorilla/mux"
 	"github.com/leozw/otel-agent-go/agent"
 )
 
@@ -23,15 +24,21 @@ func main() {
 	router := agent.StartAgent(config)
 	port := 3000
 
+	client := agent.GetHTTPClient()
+	handler := setupHandler(client, router)
+
+	log.Printf("Server is running on http://0.0.0.0:%d\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), handler))
+}
+
+// Definindo as rotas da aplicação
+func setupHandler(client *http.Client, router *mux.Router) *mux.Router {
 	fileManagerURL := os.Getenv("NEXT_PUBLIC_FILE_MANAGER_URL")
 	if fileManagerURL == "" {
 		fileManagerURL = "http://localhost:8085"
 	}
 	fmt.Println("NEXT_PUBLIC_FILE_MANAGER_URL:", fileManagerURL)
 
-	client := agent.GetHTTPClient()
-
-	// Definindo as rotas da aplicação
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusOK, Response{Message: "Hello, Open!"})
 	}).Methods("GET")
@@ -45,34 +52,32 @@ func main() {
 	}).Methods("GET")
 
 	router.HandleFunc("/external-service-1", func(w http.ResponseWriter, r *http.Request) {
-		handleExternalService(client, w, "https://jsonplaceholder.typicode.com/posts/1", "Erro ao chamar o serviço externo 1")
+		handleExternalService(client, w, r, "https://jsonplaceholder.typicode.com/posts/1", "Erro ao chamar o serviço externo 1")
 	}).Methods("GET")
 
 	router.HandleFunc("/external-service-2", func(w http.ResponseWriter, r *http.Request) {
-		handleExternalService(client, w, "https://jsonplaceholder.typicode.com/users/1", "Erro ao chamar o serviço externo 2")
+		handleExternalService(client, w, r, "https://jsonplaceholder.typicode.com/users/1", "Erro ao chamar o serviço externo 2")
 	}).Methods("GET")
 
 	router.HandleFunc("/local-service", func(w http.ResponseWriter, r *http.Request) {
-		url := fmt.Sprintf("http://localhost:%d/buteco", port)
-		handleExternalService(client, w, url, "Erro ao chamar o serviço local")
+		url := fmt.Sprintf("http://localhost:%d/buteco", 3000)
+		handleExternalService(client, w, r, url, "Erro ao chamar o serviço local")
 	}).Methods("GET")
 
 	router.HandleFunc("/file-manager-service", func(w http.ResponseWriter, r *http.Request) {
 		url := fmt.Sprintf("%s/files", fileManagerURL)
-		handleExternalService(client, w, url, "Erro ao chamar o serviço de file manager")
+		handleExternalService(client, w, r, url, "Erro ao chamar o serviço de file manager")
 	}).Methods("GET")
 
 	router.HandleFunc("/external-service-3", func(w http.ResponseWriter, r *http.Request) {
-		handleExternalService(client, w, "https://jsonplaceholder.typicode.com/albums/1", "Erro ao chamar o serviço externo 3")
+		handleExternalService(client, w, r, "https://jsonplaceholder.typicode.com/albums/1", "Erro ao chamar o serviço externo 3")
 	}).Methods("GET")
-
-	log.Printf("Server is running on http://0.0.0.0:%d\n", port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), router))
+	return router
 }
 
 // Função auxiliar para lidar com as chamadas externas
-func handleExternalService(client *http.Client, w http.ResponseWriter, url string, errorMessage string) {
-	response, err := client.Get(url)
+func handleExternalService(client *http.Client, w http.ResponseWriter, r *http.Request, url string, errorMessage string) {
+	response, err := agent.ExecuteRequest(r.Context(), client, "GET", url, nil)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, errorMessage)
 		return
